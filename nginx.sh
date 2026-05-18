@@ -59,7 +59,7 @@ fi
 # ------------------------------------------------------------
 info "Ищем порт xray..."
 
-XRAY_PORT=""
+XRAY_PORT="10085"
 
 # Ищем proxy_pass в конфигах nginx
 for conf in /etc/nginx/conf.d/*.conf /etc/nginx/sites-enabled/*; do
@@ -210,7 +210,7 @@ log "Создаём $SITE_CONF..."
 
 cat > "$SITE_CONF" << EOF
 upstream xray_backend {
-    server 127.0.0.1:${XRAY_PORT};
+    server 127.0.0.1:10085;
     keepalive 64;
     keepalive_requests 100;
     keepalive_timeout 60s;
