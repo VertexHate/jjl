@@ -24,7 +24,7 @@ echo "║         с поддержкой HTTP/3              ║"
 echo "╚══════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# ── Шаг 1: ввод домена ──
+# ── Ввод домена ──
 echo -e "${YELLOW}Введите ваш домен (например: origin.example.com):${NC}"
 read -r ORIGIN_DOMAIN
 
@@ -58,9 +58,9 @@ else
 fi
 
 # ════════════════════════════════════════════════
-# [0/6] Удаление таймера авторестарта nginx
+# [0/8] Удаление таймера авторестарта nginx
 # ════════════════════════════════════════════════
-echo -e "${GREEN}[0/6] Удаление таймера авторестарта nginx (если есть)...${NC}"
+echo -e "${GREEN}[0/8] Удаление таймера авторестарта nginx (если есть)...${NC}"
 
 TIMER_NAME="nginx-restart-5min"
 
@@ -81,7 +81,7 @@ for f in \
 do
     if [[ -f "$f" ]]; then
         rm -f "$f"
-        echo -e "${CYAN}  ✔ Удалён файл: $f${NC}"
+        echo -e "${CYAN}  ✔ Удалён: $f${NC}"
         REMOVED=true
     fi
 done
@@ -90,13 +90,13 @@ if $REMOVED; then
     systemctl daemon-reload
     echo -e "${GREEN}  ✔ Таймер авторестарта полностью удалён.${NC}"
 else
-    echo -e "${CYAN}  — Таймер не найден, ничего не делаем.${NC}"
+    echo -e "${CYAN}  — Таймер не найден, пропускаем.${NC}"
 fi
 
 # ════════════════════════════════════════════════
-# [1/6] Установка Nginx mainline с HTTP/3
+# [1/8] Установка Nginx mainline с HTTP/3
 # ════════════════════════════════════════════════
-echo -e "${GREEN}[1/6] Установка Nginx mainline с поддержкой HTTP/3...${NC}"
+echo -e "${GREEN}[1/8] Установка Nginx mainline с поддержкой HTTP/3...${NC}"
 
 apt update -y
 apt install -y curl gnupg2 ca-certificates lsb-release
@@ -117,13 +117,12 @@ echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
 ${REPO_URL} ${DISTRO_CODENAME} nginx" \
     > /etc/apt/sources.list.d/nginx.list
 
-# Приоритет mainline-репозитория над системным — именно это
-# гарантирует замену старого nginx на версию с nginx.org
+# Приоритет mainline-репозитория — гарантирует замену старого nginx
 echo -e "Package: *\nPin: origin nginx.org\nPin-Priority: 900" \
     > /etc/apt/preferences.d/99nginx
 
 apt update -y
-apt install -y nginx   # обновит старый пакет, если он был установлен
+apt install -y nginx
 
 NGINX_VERSION=$(nginx -v 2>&1)
 echo -e "${CYAN}  Версия: ${NC}${NGINX_VERSION}"
@@ -137,15 +136,15 @@ else
 fi
 
 # ════════════════════════════════════════════════
-# [2/6] Установка certbot
+# [2/8] Установка certbot
 # ════════════════════════════════════════════════
-echo -e "${GREEN}[2/6] Установка certbot...${NC}"
+echo -e "${GREEN}[2/8] Установка certbot...${NC}"
 apt install -y certbot
 
 # ════════════════════════════════════════════════
-# [3/6] Выпуск или обновление сертификата
+# [3/8] Выпуск или обновление сертификата
 # ════════════════════════════════════════════════
-echo -e "${GREEN}[3/6] Проверка SSL-сертификата для $ORIGIN_DOMAIN...${NC}"
+echo -e "${GREEN}[3/8] Проверка SSL-сертификата для $ORIGIN_DOMAIN...${NC}"
 
 CERT_PATH="/etc/letsencrypt/live/$ORIGIN_DOMAIN/fullchain.pem"
 
@@ -183,27 +182,91 @@ else
 fi
 
 # ════════════════════════════════════════════════
-# [4/6] Оптимизация nginx.conf
+# [4/8] systemd override — лимит файлов для nginx
 # ════════════════════════════════════════════════
-echo -e "${GREEN}[4/6] Настройка nginx.conf (воркеры, соединения)...${NC}"
+echo -e "${GREEN}[4/8] Настройка systemd override для nginx (LimitNOFILE)...${NC}"
+
+mkdir -p /etc/systemd/system/nginx.service.d/
+cat > /etc/systemd/system/nginx.service.d/override.conf << 'EOF'
+[Service]
+LimitNOFILE=65535
+EOF
+
+systemctl daemon-reload
+echo -e "${GREEN}  ✔ systemd override применён (LimitNOFILE=65535).${NC}"
+
+# ════════════════════════════════════════════════
+# [5/8] limits.conf — лимиты для пользователя nginx
+# ════════════════════════════════════════════════
+echo -e "${GREEN}[5/8] Настройка /etc/security/limits.conf...${NC}"
+
+# Удаляем старые записи для nginx и www-data, добавляем свежие
+sed -i '/nginx.*nofile/d'    /etc/security/limits.conf
+sed -i '/www-data.*nofile/d' /etc/security/limits.conf
+
+cat >> /etc/security/limits.conf << 'EOF'
+nginx    soft nofile 65535
+nginx    hard nofile 65535
+www-data soft nofile 65535
+www-data hard nofile 65535
+EOF
+
+echo -e "${GREEN}  ✔ limits.conf обновлён.${NC}"
+
+# ════════════════════════════════════════════════
+# [6/8] sysctl — параметры ядра
+# ════════════════════════════════════════════════
+echo -e "${GREEN}[6/8] Применение sysctl параметров...${NC}"
+
+apply_sysctl() {
+    local key="$1" val="$2"
+    if grep -q "^${key}" /etc/sysctl.conf; then
+        sed -i "s|^${key}.*|${key} = ${val}|" /etc/sysctl.conf
+    else
+        echo "${key} = ${val}" >> /etc/sysctl.conf
+    fi
+}
+
+# Очередь входящих соединений
+apply_sysctl "net.core.somaxconn"            65535
+apply_sysctl "net.ipv4.tcp_max_syn_backlog"  65535
+# Переиспользование TIME_WAIT сокетов
+apply_sysctl "net.ipv4.tcp_tw_reuse"         1
+# Таймауты
+apply_sysctl "net.ipv4.tcp_fin_timeout"      15
+apply_sysctl "net.ipv4.tcp_keepalive_time"   300
+apply_sysctl "net.ipv4.tcp_keepalive_intvl"  30
+apply_sysctl "net.ipv4.tcp_keepalive_probes" 5
+# Буферы сокетов
+apply_sysctl "net.core.rmem_max"             16777216
+apply_sysctl "net.core.wmem_max"             16777216
+# UDP-буфер для QUIC (HTTP/3)
+apply_sysctl "net.core.netdev_max_backlog"   65535
+
+sysctl -p > /dev/null 2>&1
+echo -e "${GREEN}  ✔ sysctl применён.${NC}"
+
+# ════════════════════════════════════════════════
+# [7/8] nginx.conf — воркеры и производительность
+# ════════════════════════════════════════════════
+echo -e "${GREEN}[7/8] Настройка nginx.conf (воркеры, соединения)...${NC}"
 
 CPU_CORES=$(nproc)
-MAX_FD=$(ulimit -Hn 2>/dev/null || echo 65535)
-[[ -z "$MAX_FD" || "$MAX_FD" == "unlimited" ]] && MAX_FD=65535
+MAX_FD=65535   # совпадает с LimitNOFILE выше
 
 WORKER_CONN=$(( MAX_FD / 2 ))
 [[ $WORKER_CONN -gt 65535 ]] && WORKER_CONN=65535
 [[ $WORKER_CONN -lt 1024  ]] && WORKER_CONN=1024
 
 echo -e "${CYAN}  CPU ядер:             ${NC}${CPU_CORES}"
-echo -e "${CYAN}  Лимит файлов (fd):    ${NC}${MAX_FD}"
+echo -e "${CYAN}  worker_rlimit_nofile: ${NC}${MAX_FD}"
 echo -e "${CYAN}  worker_connections:   ${NC}${WORKER_CONN}"
 
 cat > /etc/nginx/nginx.conf <<NGINXCONF
 # ── Глобальные параметры ──────────────────────
 user  nginx;
 worker_processes  auto;              # по числу CPU (${CPU_CORES} ядер)
-worker_rlimit_nofile  ${MAX_FD};     # лимит файловых дескрипторов на воркер
+worker_rlimit_nofile  ${MAX_FD};     # должен совпадать с LimitNOFILE в systemd
 
 error_log  /var/log/nginx/error.log notice;
 pid        /var/run/nginx.pid;
@@ -273,9 +336,9 @@ http {
 NGINXCONF
 
 # ════════════════════════════════════════════════
-# [5/6] Конфиг виртуального хоста с HTTP/3
+# [8/8] Конфиг виртуального хоста + HTTP/3 + фаервол
 # ════════════════════════════════════════════════
-echo -e "${GREEN}[5/6] Создание конфига сайта с HTTP/3...${NC}"
+echo -e "${GREEN}[8/8] Конфиг сайта, HTTP/3, фаервол...${NC}"
 
 if [[ "${HTTP3_AVAILABLE}" == "false" ]]; then
     HTTP3_LISTEN_V4="# listen 443 quic reuseport;  # раскомментировать после включения http_v3"
@@ -312,7 +375,6 @@ server {
     # ── Протоколы ──
     http2 on;
     ${HTTP3_ON}
-
     ${ALT_SVC}
 
     # ── SSL ──
@@ -356,11 +418,8 @@ server {
 }
 EOF
 
-# ════════════════════════════════════════════════
-# [6/6] Открытие UDP 443 для QUIC
-# ════════════════════════════════════════════════
-echo -e "${GREEN}[6/6] Открытие UDP-порта 443 для HTTP/3...${NC}"
-
+# ── Открытие UDP 443 для QUIC ──
+echo -e "${CYAN}  Открываем UDP 443 для HTTP/3...${NC}"
 if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
     ufw allow 443/udp
     echo -e "${GREEN}  ✔ UFW: UDP 443 открыт.${NC}"
@@ -377,7 +436,7 @@ else
 fi
 
 # ── Проверка и перезапуск nginx ──
-echo -e "${GREEN}[+] Проверка конфига и перезапуск nginx...${NC}"
+echo -e "${CYAN}  Проверка конфига и перезапуск nginx...${NC}"
 nginx -t
 systemctl restart nginx
 
@@ -385,6 +444,9 @@ systemctl restart nginx
 echo -e "${GREEN}[+] Перезапуск remnanode...${NC}"
 docker restart remnanode
 
+# ════════════════════════════════════════════════
+# Итог
+# ════════════════════════════════════════════════
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════╗"
 echo -e "║         ✅  Установка завершена!         ║"
@@ -394,11 +456,18 @@ echo -e "${CYAN}Домен:   ${NC}https://$ORIGIN_DOMAIN"
 echo -e "${CYAN}Порт:    ${NC}$INBOUND_PORT"
 echo -e "${CYAN}Почта:   ${NC}$EMAIL"
 echo ""
+echo -e "${CYAN}Оптимизация системы:${NC}"
+echo -e "  LimitNOFILE (systemd):  ${GREEN}65535${NC}"
+echo -e "  nofile (limits.conf):   ${GREEN}65535${NC}"
+echo -e "  somaxconn:              ${GREEN}65535${NC}"
+echo -e "  tcp_max_syn_backlog:    ${GREEN}65535${NC}"
+echo -e "  netdev_max_backlog:     ${GREEN}65535${NC}"
+echo ""
 echo -e "${CYAN}Nginx:${NC}"
-echo -e "  worker_processes:    ${GREEN}auto (${CPU_CORES} ядер)${NC}"
-echo -e "  worker_connections:  ${GREEN}${WORKER_CONN}${NC}"
-echo -e "  worker_rlimit_nofile:${GREEN}${MAX_FD}${NC}"
-echo -e "  Макс. соединений:    ${GREEN}$(( CPU_CORES * WORKER_CONN ))${NC} (ядра × connections)"
+echo -e "  worker_processes:       ${GREEN}auto (${CPU_CORES} ядер)${NC}"
+echo -e "  worker_rlimit_nofile:   ${GREEN}${MAX_FD}${NC}"
+echo -e "  worker_connections:     ${GREEN}${WORKER_CONN}${NC}"
+echo -e "  Макс. соединений:       ${GREEN}$(( CPU_CORES * WORKER_CONN ))${NC} (ядра × connections)"
 echo ""
 echo -e "${CYAN}Протоколы:${NC}"
 echo -e "  ${GREEN}✔${NC} HTTP/1.1 (TCP 443)"
