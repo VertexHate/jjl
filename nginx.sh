@@ -216,8 +216,6 @@ upstream xray_backend {
     keepalive_timeout 60s;
 }
 
-limit_conn_zone \$binary_remote_addr zone=vpn_limit:10m;
-
 server {
     listen 443 ssl http2;
     server_name ${DOMAIN};
@@ -228,7 +226,6 @@ server {
     client_max_body_size 0;
 
     location / {
-        limit_conn vpn_limit 100;
 
         proxy_pass http://xray_backend;
         proxy_http_version 1.1;
