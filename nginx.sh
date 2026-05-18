@@ -319,6 +319,42 @@ systemctl restart nginx
 log "nginx перезапущен"
 
 # ------------------------------------------------------------
+# 10.1. Авто-перезапуск nginx каждые 5 минут
+# ------------------------------------------------------------
+log "Настраиваем systemd timer для перезапуска nginx каждые 5 минут..."
+
+SYSTEMCTL_BIN="$(command -v systemctl)"
+[ -z "$SYSTEMCTL_BIN" ] && err "systemctl не найден"
+
+cat > /etc/systemd/system/nginx-restart-5min.service << EOF
+[Unit]
+Description=Restart nginx every 5 minutes
+
+[Service]
+Type=oneshot
+ExecStart=${SYSTEMCTL_BIN} restart nginx
+EOF
+
+cat > /etc/systemd/system/nginx-restart-5min.timer << 'EOF'
+[Unit]
+Description=Run nginx restart every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=nginx-restart-5min.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now nginx-restart-5min.timer
+
+log "Таймер автоперезапуска nginx включён"
+
+# ------------------------------------------------------------
 # 11. Итог
 # ------------------------------------------------------------
 echo ""
