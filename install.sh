@@ -143,7 +143,7 @@ apt update -y
 apt install -y curl gnupg2 ca-certificates lsb-release
 
 curl -fsSL https://nginx.org/keys/nginx_signing.key \
-    | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
+    | gpg --dearmor | tee /usr/share/keyrings/nginx-archive-keyring.gpg > /dev/null
 
 if [[ "$DISTRO_ID" == "ubuntu" ]]; then
     REPO_URL="https://nginx.org/packages/mainline/ubuntu"
