@@ -142,8 +142,9 @@ echo -e "${GREEN}[1/8] Установка Nginx mainline с поддержкой
 apt update -y
 apt install -y curl gnupg2 ca-certificates lsb-release
 
+rm -f /usr/share/keyrings/nginx-archive-keyring.gpg
 curl -fsSL https://nginx.org/keys/nginx_signing.key \
-    | gpg --dearmor | tee /usr/share/keyrings/nginx-archive-keyring.gpg > /dev/null
+    | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
 
 if [[ "$DISTRO_ID" == "ubuntu" ]]; then
     REPO_URL="https://nginx.org/packages/mainline/ubuntu"
