@@ -224,20 +224,24 @@ echo -e "${GREEN}[3/8] Проверка SSL-сертификата для $ORIGI
 
 CERT_PATH="/etc/letsencrypt/live/$ORIGIN_DOMAIN/fullchain.pem"
 
-# Функция: временно останавливаем nginx только если он запущен
+# Используем глобальную переменную вместо return-кода
+# чтобы не конфликтовать с set -e
+NGINX_WAS_RUNNING=false
+
 nginx_stop_if_running() {
     if systemctl is-active --quiet nginx 2>/dev/null; then
         systemctl stop nginx
+        NGINX_WAS_RUNNING=true
         echo -e "${CYAN}  nginx остановлен для certbot.${NC}"
-        return 0
+    else
+        NGINX_WAS_RUNNING=false
+        echo -e "${CYAN}  nginx не запущен, certbot может занять порт 80.${NC}"
     fi
-    return 1
 }
 
 nginx_start_if_was_running() {
-    local was_running="$1"
-    if [[ "$was_running" == "0" ]]; then
-        systemctl start nginx
+    if [[ "$NGINX_WAS_RUNNING" == "true" ]]; then
+        systemctl start nginx 2>/dev/null || true
         echo -e "${CYAN}  nginx запущен.${NC}"
     fi
 }
@@ -251,28 +255,36 @@ if [[ -f "$CERT_PATH" ]]; then
     echo -e "${CYAN}  Сертификат найден. Дней до истечения: ${DAYS_LEFT}${NC}"
 
     if [[ $DAYS_LEFT -lt 30 ]]; then
-        echo -e "${YELLOW}  Обновляем сертификат (осталось менее 30 дней)...${NC}"
-        nginx_stop_if_running; WAS=$?
+        echo -e "${YELLOW}  Обновляем сертификат...${NC}"
+        nginx_stop_if_running
         certbot certonly --standalone \
             -d "$ORIGIN_DOMAIN" \
-            --non-interactive \
-            --agree-tos \
-            -m "$EMAIL" \
-            --force-renewal
-        nginx_start_if_was_running "$WAS"
+            --non-interactive --agree-tos \
+            -m "$EMAIL" --force-renewal
+        nginx_start_if_was_running
     else
-        echo -e "${GREEN}  ✔ Сертификат актуален, пропускаем выпуск.${NC}"
+        echo -e "${GREEN}  ✔ Сертификат актуален.${NC}"
     fi
 else
     echo -e "${YELLOW}  Сертификат не найден, выпускаем...${NC}"
-    nginx_stop_if_running; WAS=$?
+    nginx_stop_if_running
     certbot certonly --standalone \
         -d "$ORIGIN_DOMAIN" \
-        --non-interactive \
-        --agree-tos \
+        --non-interactive --agree-tos \
         -m "$EMAIL"
-    nginx_start_if_was_running "$WAS"
+    nginx_start_if_was_running
 fi
+
+# Проверяем что сертификат успешно выпущен
+if [[ ! -f "$CERT_PATH" ]]; then
+    echo -e "${RED}  ✗ Сертификат не был выпущен! Проверьте:${NC}"
+    echo -e "${RED}    1. DNS запись A для $ORIGIN_DOMAIN указывает на этот сервер${NC}"
+    echo -e "${RED}    2. Порт 80 доступен снаружи${NC}"
+    echo -e "${RED}    3. Не заблокирован фаерволом${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}  ✔ Сертификат готов.${NC}"
 
 # ════════════════════════════════════════════════
 # [4/8] systemd override — лимит файлов для nginx
