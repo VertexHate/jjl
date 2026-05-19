@@ -36,23 +36,17 @@ fi
 DETECTED_DOMAIN=""
 
 if [[ -d /etc/nginx/conf.d ]]; then
-    # Ищем server_name в файлах где есть listen 443
     for conf in /etc/nginx/conf.d/*.conf; do
         [[ -f "$conf" ]] || continue
-
-        # Файл должен содержать listen 443
         if ! grep -q "listen.*443" "$conf"; then
             continue
         fi
-
-        # Извлекаем первый server_name который не является _ или localhost
         domain=$(grep -E "^\s*server_name\s+" "$conf" \
             | grep -v "server_name\s*_" \
             | grep -v "server_name\s*localhost" \
             | awk '{print $2}' \
             | tr -d ';' \
             | head -1)
-
         if [[ -n "$domain" ]]; then
             DETECTED_DOMAIN="$domain"
             echo -e "${GREEN}Найден существующий конфиг: ${CYAN}$conf${NC}"
@@ -313,7 +307,7 @@ pid        /var/run/nginx.pid;
 
 # ── События ───────────────────────────────────
 events {
-    worker_connections  ${WORKER_CONN}; # макс. соединений на воркер
+    worker_connections  ${WORKER_CONN};
     use epoll;
     multi_accept on;
 }
@@ -371,10 +365,32 @@ http {
 NGINXCONF
 
 # ════════════════════════════════════════════════
-# [8/8] Конфиг сайта + HTTP/3 + фаервол
+# [8/8] Очистка старых конфигов + новый конфиг + HTTP/3 + фаервол
 # ════════════════════════════════════════════════
 echo -e "${GREEN}[8/8] Конфиг сайта, HTTP/3, фаервол...${NC}"
 
+# ── Удаляем все старые конфиги в conf.d которые слушают 443 ──
+echo -e "${CYAN}  Удаление старых конфигов с портом 443...${NC}"
+OUR_CONF="remnawave-xhttp-cdn.conf"
+DELETED_ANY=false
+
+for conf in /etc/nginx/conf.d/*.conf; do
+    [[ -f "$conf" ]] || continue
+    # Пропускаем наш собственный файл (он будет перезаписан ниже)
+    [[ "$(basename "$conf")" == "$OUR_CONF" ]] && continue
+
+    if grep -q "listen.*443" "$conf"; then
+        rm -f "$conf"
+        echo -e "${CYAN}  ✔ Удалён конфиг: $conf${NC}"
+        DELETED_ANY=true
+    fi
+done
+
+if ! $DELETED_ANY; then
+    echo -e "${CYAN}  — Лишних конфигов не найдено.${NC}"
+fi
+
+# ── Пишем новый конфиг ──
 if [[ "${HTTP3_AVAILABLE}" == "false" ]]; then
     HTTP3_LISTEN_V4="# listen 443 quic reuseport;  # раскомментировать после включения http_v3"
     HTTP3_LISTEN_V6="# listen [::]:443 quic reuseport;"
@@ -450,6 +466,8 @@ server {
     }
 }
 EOF
+
+echo -e "${GREEN}  ✔ Конфиг записан: /etc/nginx/conf.d/${OUR_CONF}${NC}"
 
 # ── Открытие UDP 443 ──
 echo -e "${CYAN}  Открываем UDP 443 для HTTP/3...${NC}"
