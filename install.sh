@@ -142,7 +142,7 @@ echo -e "${GREEN}[1/8] Установка Nginx mainline с поддержкой
 apt update -y
 apt install -y curl gnupg2 ca-certificates lsb-release
 
-rm -f /usr/share/keyrings/nginx-archive-keyring.gpg
+rm -rf /usr/share/keyrings/nginx-archive-keyring.gpg
 curl -fsSL https://nginx.org/keys/nginx_signing.key \
     | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg
 
