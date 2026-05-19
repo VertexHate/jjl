@@ -24,9 +24,62 @@ echo "║         с поддержкой HTTP/3              ║"
 echo "╚══════════════════════════════════════════╝"
 echo -e "${NC}"
 
+# ── Проверка root ──
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${RED}Запустите скрипт от root: sudo bash install.sh${NC}"
+    exit 1
+fi
+
+# ════════════════════════════════════════════════
+# Автоопределение домена из conf.d
+# ════════════════════════════════════════════════
+DETECTED_DOMAIN=""
+
+if [[ -d /etc/nginx/conf.d ]]; then
+    # Ищем server_name в файлах где есть listen 443
+    for conf in /etc/nginx/conf.d/*.conf; do
+        [[ -f "$conf" ]] || continue
+
+        # Файл должен содержать listen 443
+        if ! grep -q "listen.*443" "$conf"; then
+            continue
+        fi
+
+        # Извлекаем первый server_name который не является _ или localhost
+        domain=$(grep -E "^\s*server_name\s+" "$conf" \
+            | grep -v "server_name\s*_" \
+            | grep -v "server_name\s*localhost" \
+            | awk '{print $2}' \
+            | tr -d ';' \
+            | head -1)
+
+        if [[ -n "$domain" ]]; then
+            DETECTED_DOMAIN="$domain"
+            echo -e "${GREEN}Найден существующий конфиг: ${CYAN}$conf${NC}"
+            echo -e "${GREEN}Обнаружен домен: ${CYAN}$domain${NC}"
+            echo ""
+            break
+        fi
+    done
+fi
+
 # ── Ввод домена ──
-echo -e "${YELLOW}Введите ваш домен (например: origin.example.com):${NC}"
-read -r ORIGIN_DOMAIN
+if [[ -n "$DETECTED_DOMAIN" ]]; then
+    echo -e "${YELLOW}Использовать найденный домен ${CYAN}${DETECTED_DOMAIN}${YELLOW}? [Y/n]:${NC} "
+    read -r CONFIRM
+    CONFIRM="${CONFIRM:-Y}"
+    if [[ "${CONFIRM,,}" == "y" || "${CONFIRM,,}" == "yes" ]]; then
+        ORIGIN_DOMAIN="$DETECTED_DOMAIN"
+        echo -e "${GREEN}  ✔ Используем домен: $ORIGIN_DOMAIN${NC}"
+    else
+        echo -e "${YELLOW}Введите ваш домен (например: origin.example.com):${NC}"
+        read -r ORIGIN_DOMAIN
+    fi
+else
+    echo -e "${CYAN}Существующих конфигов с портом 443 не найдено.${NC}"
+    echo -e "${YELLOW}Введите ваш домен (например: origin.example.com):${NC}"
+    read -r ORIGIN_DOMAIN
+fi
 
 if [[ -z "$ORIGIN_DOMAIN" ]]; then
     echo -e "${RED}Ошибка: домен не может быть пустым.${NC}"
@@ -38,14 +91,8 @@ echo -e "${CYAN}▶ Домен:        ${NC}$ORIGIN_DOMAIN"
 echo -e "${CYAN}▶ Почта:        ${NC}$EMAIL"
 echo -e "${CYAN}▶ Порт inbound: ${NC}$INBOUND_PORT"
 echo ""
-echo -e "${YELLOW}Начинаем установку... (требуются права root)${NC}"
+echo -e "${YELLOW}Начинаем установку...${NC}"
 echo ""
-
-# ── Проверка root ──
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}Запустите скрипт от root: sudo bash install.sh${NC}"
-    exit 1
-fi
 
 # ── Определение дистрибутива ──
 if [[ -f /etc/os-release ]]; then
@@ -117,7 +164,6 @@ echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] \
 ${REPO_URL} ${DISTRO_CODENAME} nginx" \
     > /etc/apt/sources.list.d/nginx.list
 
-# Приоритет mainline-репозитория — гарантирует замену старого nginx
 echo -e "Package: *\nPin: origin nginx.org\nPin-Priority: 900" \
     > /etc/apt/preferences.d/99nginx
 
@@ -196,11 +242,10 @@ systemctl daemon-reload
 echo -e "${GREEN}  ✔ systemd override применён (LimitNOFILE=65535).${NC}"
 
 # ════════════════════════════════════════════════
-# [5/8] limits.conf — лимиты для пользователя nginx
+# [5/8] limits.conf
 # ════════════════════════════════════════════════
 echo -e "${GREEN}[5/8] Настройка /etc/security/limits.conf...${NC}"
 
-# Удаляем старые записи для nginx и www-data, добавляем свежие
 sed -i '/nginx.*nofile/d'    /etc/security/limits.conf
 sed -i '/www-data.*nofile/d' /etc/security/limits.conf
 
@@ -227,20 +272,15 @@ apply_sysctl() {
     fi
 }
 
-# Очередь входящих соединений
 apply_sysctl "net.core.somaxconn"            65535
 apply_sysctl "net.ipv4.tcp_max_syn_backlog"  65535
-# Переиспользование TIME_WAIT сокетов
 apply_sysctl "net.ipv4.tcp_tw_reuse"         1
-# Таймауты
 apply_sysctl "net.ipv4.tcp_fin_timeout"      15
 apply_sysctl "net.ipv4.tcp_keepalive_time"   300
 apply_sysctl "net.ipv4.tcp_keepalive_intvl"  30
 apply_sysctl "net.ipv4.tcp_keepalive_probes" 5
-# Буферы сокетов
 apply_sysctl "net.core.rmem_max"             16777216
 apply_sysctl "net.core.wmem_max"             16777216
-# UDP-буфер для QUIC (HTTP/3)
 apply_sysctl "net.core.netdev_max_backlog"   65535
 
 sysctl -p > /dev/null 2>&1
@@ -252,7 +292,7 @@ echo -e "${GREEN}  ✔ sysctl применён.${NC}"
 echo -e "${GREEN}[7/8] Настройка nginx.conf (воркеры, соединения)...${NC}"
 
 CPU_CORES=$(nproc)
-MAX_FD=65535   # совпадает с LimitNOFILE выше
+MAX_FD=65535
 
 WORKER_CONN=$(( MAX_FD / 2 ))
 [[ $WORKER_CONN -gt 65535 ]] && WORKER_CONN=65535
@@ -266,7 +306,7 @@ cat > /etc/nginx/nginx.conf <<NGINXCONF
 # ── Глобальные параметры ──────────────────────
 user  nginx;
 worker_processes  auto;              # по числу CPU (${CPU_CORES} ядер)
-worker_rlimit_nofile  ${MAX_FD};     # должен совпадать с LimitNOFILE в systemd
+worker_rlimit_nofile  ${MAX_FD};     # совпадает с LimitNOFILE в systemd
 
 error_log  /var/log/nginx/error.log notice;
 pid        /var/run/nginx.pid;
@@ -274,8 +314,8 @@ pid        /var/run/nginx.pid;
 # ── События ───────────────────────────────────
 events {
     worker_connections  ${WORKER_CONN}; # макс. соединений на воркер
-    use epoll;            # наиболее эффективный метод на Linux
-    multi_accept on;      # принимать все входящие соединения за раз
+    use epoll;
+    multi_accept on;
 }
 
 # ── HTTP ──────────────────────────────────────
@@ -288,27 +328,23 @@ http {
                       '"\$http_user_agent" "\$http_x_forwarded_for"';
     access_log  /var/log/nginx/access.log  main;
 
-    # Производительность
     sendfile            on;
     tcp_nopush          on;
     tcp_nodelay         on;
     keepalive_timeout   65;
     keepalive_requests  10000;
 
-    # Буферы
     client_body_buffer_size     128k;
     client_header_buffer_size   1k;
     large_client_header_buffers 4 16k;
     output_buffers              1 32k;
     postpone_output             1460;
 
-    # Таймауты
     client_header_timeout     30s;
     client_body_timeout       60s;
     send_timeout              60s;
     reset_timedout_connection on;
 
-    # Gzip
     gzip             on;
     gzip_comp_level  5;
     gzip_min_length  256;
@@ -323,7 +359,6 @@ http {
         text/plain
         text/xml;
 
-    # Open file cache
     open_file_cache           max=10000 inactive=30s;
     open_file_cache_valid     60s;
     open_file_cache_min_uses  2;
@@ -336,7 +371,7 @@ http {
 NGINXCONF
 
 # ════════════════════════════════════════════════
-# [8/8] Конфиг виртуального хоста + HTTP/3 + фаервол
+# [8/8] Конфиг сайта + HTTP/3 + фаервол
 # ════════════════════════════════════════════════
 echo -e "${GREEN}[8/8] Конфиг сайта, HTTP/3, фаервол...${NC}"
 
@@ -372,12 +407,10 @@ server {
 
     server_name $ORIGIN_DOMAIN;
 
-    # ── Протоколы ──
     http2 on;
     ${HTTP3_ON}
     ${ALT_SVC}
 
-    # ── SSL ──
     ssl_certificate     /etc/letsencrypt/live/$ORIGIN_DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$ORIGIN_DOMAIN/privkey.pem;
 
@@ -418,7 +451,7 @@ server {
 }
 EOF
 
-# ── Открытие UDP 443 для QUIC ──
+# ── Открытие UDP 443 ──
 echo -e "${CYAN}  Открываем UDP 443 для HTTP/3...${NC}"
 if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
     ufw allow 443/udp
@@ -436,9 +469,10 @@ else
 fi
 
 # ── Проверка и перезапуск nginx ──
-echo -e "${CYAN}  Проверка конфига и перезапуск nginx...${NC}"
+echo -e "${CYAN}  Проверка конфига nginx...${NC}"
 nginx -t
 systemctl restart nginx
+echo -e "${GREEN}  ✔ nginx перезапущен.${NC}"
 
 # ── Перезапуск ноды ──
 echo -e "${GREEN}[+] Перезапуск remnanode...${NC}"
