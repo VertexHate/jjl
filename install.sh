@@ -426,7 +426,7 @@ server {
 
     http2 on;
     ${HTTP3_ON}
-    ${ALT_SVC}
+    
 
     ssl_certificate     /etc/letsencrypt/live/$ORIGIN_DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$ORIGIN_DOMAIN/privkey.pem;
@@ -437,9 +437,6 @@ server {
     ssl_session_timeout 1d;
     ssl_session_cache shared:SSL:10m;
     ssl_session_tickets off;
-
-    add_header Strict-Transport-Security "max-age=63072000" always;
-    add_header X-Content-Type-Options "nosniff" always;
 
     client_max_body_size 0;
 
@@ -459,7 +456,10 @@ server {
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         send_timeout 3600s;
-
+        
+        ${ALT_SVC}
+        add_header Strict-Transport-Security "max-age=63072000" always;
+        add_header X-Content-Type-Options "nosniff" always;
         add_header Cache-Control "no-store" always;
         add_header Pragma "no-cache" always;
         add_header Expires "0" always;
