@@ -294,7 +294,6 @@ echo -e "${CYAN}  Проверка ulimit -n внутри remnanode: ${GREEN}${U
 # [5/8] limits.conf
 # ════════════════════════════════════════════════
 # Настройка системных лимитов
-print_msg "Настройка системных лимитов (ulimits)..."
 
 # Создание/обновление limits.conf
 cat > /etc/security/limits.conf << 'EOF'
@@ -318,10 +317,6 @@ root            hard    nproc           65535
 # End of file
 EOF
 
-print_msg "Файл /etc/security/limits.conf обновлен"
-
-# Настройка sysctl для оптимизации сети
-print_msg "Настройка параметров ядра (sysctl)..."
 
 cat >> /etc/sysctl.conf << 'EOF'
 
