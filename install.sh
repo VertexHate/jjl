@@ -236,6 +236,60 @@ EOF
 systemctl daemon-reload
 echo -e "${GREEN}  ✔ systemd override применён (LimitNOFILE=65535).${NC}"
 
+
+# ════════════════════════════════════════════
+# [4b/8] Лимиты для Docker (daemon.json)
+# ════════════════════════════════════════════
+echo -e "${GREEN}[4b/8] Настройка лимитов Docker-демона...${NC}"
+
+# Сохраняем существующий daemon.json если есть
+DAEMON_JSON="/etc/docker/daemon.json"
+
+if [[ -f "$DAEMON_JSON" ]]; then
+    # Мержим через python3 чтобы не затереть чужие настройки
+    python3 - << 'PYEOF'
+import json, sys
+
+path = "/etc/docker/daemon.json"
+with open(path) as f:
+    cfg = json.load(f)
+
+cfg["default-ulimits"] = {
+    "nofile": {"Name": "nofile", "Hard": 1048576, "Soft": 1048576}
+}
+
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+
+print("  daemon.json обновлён (merge)")
+PYEOF
+else
+    cat > "$DAEMON_JSON" << 'EOF'
+{
+  "default-ulimits": {
+    "nofile": {
+      "Name": "nofile",
+      "Hard": 1048576,
+      "Soft": 1048576
+    }
+  }
+}
+EOF
+    echo -e "${GREEN}  ✔ daemon.json создан.${NC}"
+fi
+
+systemctl daemon-reload
+systemctl restart docker
+echo -e "${GREEN}  ✔ Docker-демон перезапущен.${NC}"
+
+# Ждём пока контейнер поднимется обратно
+sleep 3
+docker start remnanode 2>/dev/null || true
+
+# Проверка
+ULIMIT_VAL=$(docker exec remnanode sh -c "ulimit -n" 2>/dev/null || echo "н/д")
+echo -e "${CYAN}  Проверка ulimit -n внутри remnanode: ${GREEN}${ULIMIT_VAL}${NC}"
+
 # ════════════════════════════════════════════════
 # [5/8] limits.conf
 # ════════════════════════════════════════════════
@@ -481,6 +535,13 @@ server {
     proxy_request_buffering off;
     proxy_ignore_client_abort on;
 
+     # ── Фейковая страница (маскировка) ──
+    location / {
+        root /var/www/fake;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+
     location /api/user {
         proxy_pass http://127.0.0.1:${INBOUND_PORT};
 
@@ -520,6 +581,56 @@ else
     echo -e "${YELLOW}  ⚠ Фаервол не обнаружен. Откройте UDP 443 вручную.${NC}"
 fi
 
+# ── Создание фейковой страницы ──
+echo -e "${CYAN}  Создание фейковой страницы...${NC}"
+mkdir -p /var/www/fake
+cat > /var/www/fake/index.html << 'FAKEHTML'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        h1 { font-size: 3rem; font-weight: 300; color: #fff; margin-bottom: 1rem; }
+        p  { font-size: 1.1rem; color: #888; margin-bottom: 0.5rem; }
+        .dot { display: inline-block; width: 8px; height: 8px;
+               border-radius: 50%; background: #4caf50;
+               margin-right: 8px; animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+        .status { margin-top: 2rem; font-size: 0.85rem; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Welcome</h1>
+        <p><span class="dot"></span>Service is running</p>
+        <div class="status">nginx/stable</div>
+    </div>
+</body>
+</html>
+FAKEHTML
+
+chown -R nginx:nginx /var/www/fake 2>/dev/null || chown -R www-data:www-data /var/www/fake 2>/dev/null || true
+echo -e "${GREEN}  ✔ Фейковая страница создана: /var/www/fake/index.html${NC}"
+
 # ── Проверка и перезапуск nginx ──
 echo -e "${CYAN}  Проверка конфига nginx...${NC}"
 nginx -t
@@ -548,6 +659,14 @@ echo -e "  nofile (limits.conf):   ${GREEN}65535${NC}"
 echo -e "  somaxconn:              ${GREEN}65535${NC}"
 echo -e "  tcp_max_syn_backlog:    ${GREEN}65535${NC}"
 echo -e "  netdev_max_backlog:     ${GREEN}65535${NC}"
+echo ""
+echo -e "${CYAN}Фейковая страница:${NC}"
+echo -e "  URL:  ${GREEN}https://$ORIGIN_DOMAIN/${NC}"
+echo -e "  Путь: ${GREEN}/var/www/fake/index.html${NC}"
+echo ""
+echo -e "${CYAN}Лимиты Xray (remnanode):${NC}"
+echo -e "  nofile (container ulimit): ${GREEN}1048576${NC}"
+echo -e "  Docker daemon LimitNOFILE: ${GREEN}1048576${NC}"
 echo ""
 echo -e "${CYAN}Nginx:${NC}"
 echo -e "  worker_processes:       ${GREEN}auto (${CPU_CORES} ядер)${NC}"
