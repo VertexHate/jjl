@@ -239,19 +239,55 @@ echo -e "${GREEN}  ✔ systemd override применён (LimitNOFILE=65535).${N
 # ════════════════════════════════════════════════
 # [5/8] limits.conf
 # ════════════════════════════════════════════════
-echo -e "${GREEN}[5/8] Настройка /etc/security/limits.conf...${NC}"
+# Настройка системных лимитов
+print_msg "Настройка системных лимитов (ulimits)..."
 
-sed -i '/nginx.*nofile/d'    /etc/security/limits.conf
-sed -i '/www-data.*nofile/d' /etc/security/limits.conf
+# Создание/обновление limits.conf
+cat > /etc/security/limits.conf << 'EOF'
+# /etc/security/limits.conf
+#
+#Each line describes a limit for a user in the form:
+#
+#<domain>        <type>  <item>  <value>
+#
 
-cat >> /etc/security/limits.conf << 'EOF'
-nginx    soft nofile 65535
-nginx    hard nofile 65535
-www-data soft nofile 65535
-www-data hard nofile 65535
+*               soft    nofile          65535
+*               hard    nofile          65535
+root            soft    nofile          65535
+root            hard    nofile          65535
+
+*               soft    nproc           65535
+*               hard    nproc           65535
+root            soft    nproc           65535
+root            hard    nproc           65535
+
+# End of file
 EOF
 
-echo -e "${GREEN}  ✔ limits.conf обновлён.${NC}"
+print_msg "Файл /etc/security/limits.conf обновлен"
+
+# Настройка sysctl для оптимизации сети
+print_msg "Настройка параметров ядра (sysctl)..."
+
+cat >> /etc/sysctl.conf << 'EOF'
+
+# Оптимизация для Xray + Nginx
+fs.file-max = 1000000
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.ipv4.tcp_rmem = 4096 87380 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = fq
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
+EOF
+
+sysctl -p
 
 # ════════════════════════════════════════════════
 # [6/8] sysctl — параметры ядра
