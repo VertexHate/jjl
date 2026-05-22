@@ -414,11 +414,9 @@ server {
 }
 
 server {
-    # ── TCP: HTTP/1.1 + HTTP/2 ──
     listen 443 ssl;
     listen [::]:443 ssl;
 
-    # ── UDP: HTTP/3 (QUIC) ──
     ${HTTP3_LISTEN_V4}
     ${HTTP3_LISTEN_V6}
 
@@ -451,10 +449,10 @@ server {
         proxy_pass http://127.0.0.1:${INBOUND_PORT};
 
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_set_header Connection "";
 
         proxy_read_timeout 3600s;
