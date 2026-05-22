@@ -439,31 +439,30 @@ server {
     ssl_session_tickets off;
 
     client_max_body_size 0;
+    large_client_header_buffers 32 128k;
+    client_header_buffer_size 128k;
+    underscores_in_headers on;
 
-    location / {
-        proxy_pass http://127.0.0.1:$INBOUND_PORT;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_ignore_client_abort on;
+
+    location /api/user {
+        proxy_pass http://127.0.0.1:${INBOUND_PORT};
 
         proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_cache off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
 
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         send_timeout 3600s;
-        
-        ${ALT_SVC}
+
+        add_header Alt-Svc 'h3=":443"; ma=86400' always;
         add_header Strict-Transport-Security "max-age=63072000" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Cache-Control "no-store" always;
-        add_header Pragma "no-cache" always;
-        add_header Expires "0" always;
-        add_header X-Accel-Expires "0" always;
     }
 }
 EOF
