@@ -530,17 +530,18 @@ server {
     proxy_request_buffering off;
     proxy_ignore_client_abort on;
 
-     # ── Фейковая страница (маскировка) ──
-    location / {
-        root /var/www/fake;
-        index index.html;
-        try_files $uri $uri/ =404;
-    }
+    	location = / {
+    return 200 'OK';
+    add_header Content-Type text/plain;
+}
 
     location /api/user {
         proxy_pass http://127.0.0.1:${INBOUND_PORT};
 
         proxy_http_version 1.1;
+
+        proxy_set_header Upgrade \$http_upgrade;
+         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -575,56 +576,6 @@ elif command -v iptables &>/dev/null; then
 else
     echo -e "${YELLOW}  ⚠ Фаервол не обнаружен. Откройте UDP 443 вручную.${NC}"
 fi
-
-# ── Создание фейковой страницы ──
-echo -e "${CYAN}  Создание фейковой страницы...${NC}"
-mkdir -p /var/www/fake
-cat > /var/www/fake/index.html << 'FAKEHTML'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welcome</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #0f0f0f;
-            color: #e0e0e0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-        }
-        .container {
-            text-align: center;
-            padding: 2rem;
-        }
-        h1 { font-size: 3rem; font-weight: 300; color: #fff; margin-bottom: 1rem; }
-        p  { font-size: 1.1rem; color: #888; margin-bottom: 0.5rem; }
-        .dot { display: inline-block; width: 8px; height: 8px;
-               border-radius: 50%; background: #4caf50;
-               margin-right: 8px; animation: pulse 2s infinite; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50%       { opacity: 0.3; }
-        }
-        .status { margin-top: 2rem; font-size: 0.85rem; color: #555; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Welcome</h1>
-        <p><span class="dot"></span>Service is running</p>
-        <div class="status">nginx/stable</div>
-    </div>
-</body>
-</html>
-FAKEHTML
-
-chown -R nginx:nginx /var/www/fake 2>/dev/null || chown -R www-data:www-data /var/www/fake 2>/dev/null || true
-echo -e "${GREEN}  ✔ Фейковая страница создана: /var/www/fake/index.html${NC}"
 
 # ── Проверка и перезапуск nginx ──
 echo -e "${CYAN}  Проверка конфига nginx...${NC}"
