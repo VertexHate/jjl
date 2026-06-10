@@ -284,11 +284,6 @@ echo -e "${GREEN}  ✔ Docker-демон перезапущен.${NC}"
 
 # Ждём пока контейнер поднимется обратно
 sleep 3
-docker start remnanode 2>/dev/null || true
-
-# Проверка
-ULIMIT_VAL=$(docker exec remnanode sh -c "ulimit -n" 2>/dev/null || echo "н/д")
-echo -e "${CYAN}  Проверка ulimit -n внутри remnanode: ${GREEN}${ULIMIT_VAL}${NC}"
 
 # ════════════════════════════════════════════════
 # [5/8] limits.conf
