@@ -237,53 +237,7 @@ systemctl daemon-reload
 echo -e "${GREEN}  ✔ systemd override применён (LimitNOFILE=65535).${NC}"
 
 
-# ════════════════════════════════════════════
-# [4b/8] Лимиты для Docker (daemon.json)
-# ════════════════════════════════════════════
-echo -e "${GREEN}[4b/8] Настройка лимитов Docker-демона...${NC}"
 
-# Сохраняем существующий daemon.json если есть
-DAEMON_JSON="/etc/docker/daemon.json"
-
-if [[ -f "$DAEMON_JSON" ]]; then
-    # Мержим через python3 чтобы не затереть чужие настройки
-    python3 - << 'PYEOF'
-import json, sys
-
-path = "/etc/docker/daemon.json"
-with open(path) as f:
-    cfg = json.load(f)
-
-cfg["default-ulimits"] = {
-    "nofile": {"Name": "nofile", "Hard": 1048576, "Soft": 1048576}
-}
-
-with open(path, "w") as f:
-    json.dump(cfg, f, indent=2)
-
-print("  daemon.json обновлён (merge)")
-PYEOF
-else
-    cat > "$DAEMON_JSON" << 'EOF'
-{
-  "default-ulimits": {
-    "nofile": {
-      "Name": "nofile",
-      "Hard": 1048576,
-      "Soft": 1048576
-    }
-  }
-}
-EOF
-    echo -e "${GREEN}  ✔ daemon.json создан.${NC}"
-fi
-
-systemctl daemon-reload
-systemctl restart docker
-echo -e "${GREEN}  ✔ Docker-демон перезапущен.${NC}"
-
-# Ждём пока контейнер поднимется обратно
-sleep 3
 
 # ════════════════════════════════════════════════
 # [5/8] limits.conf
@@ -577,10 +531,6 @@ echo -e "${CYAN}  Проверка конфига nginx...${NC}"
 nginx -t
 systemctl restart nginx
 echo -e "${GREEN}  ✔ nginx перезапущен.${NC}"
-
-# ── Перезапуск ноды ──
-echo -e "${GREEN}[+] Перезапуск remnanode...${NC}"
-docker restart remnanode
 
 # ════════════════════════════════════════════════
 # Итог
